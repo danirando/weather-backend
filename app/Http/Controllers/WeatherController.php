@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class WeatherController extends Controller
 {
@@ -17,19 +18,38 @@ class WeatherController extends Controller
     {
         $cacheKey = "search_city_" . strtolower($city);
 
-        $data = Cache::remember($cacheKey, now()->addDay(), function () use ($city) {
+        $ttlMemory = now()->addMinutes(10);  // in-memory breve
+        $ttlPersistent = now()->addDay();    // persistente lungo
+
+        // Cache in-memory
+        $data = Cache::store('array')->get($cacheKey);
+
+        // Cache persistente
+        if (!$data) {
+            $data = Cache::store('database')->get($cacheKey);
+        }
+
+        // Cache miss → API
+        if (!$data) {
             $response = Http::get("http://api.openweathermap.org/geo/1.0/direct", [
                 'q' => $city,
                 'limit' => 5,
                 'appid' => config('services.openweather.key'),
             ]);
-            return $response->json();
-        });
+            $data = $response->json();
+
+            Log::info("Cache miss for key: {$cacheKey}");
+
+            // Salvo in entrambe le cache
+            Cache::store('array')->put($cacheKey, $data, $ttlMemory);
+            Cache::store('database')->put($cacheKey, $data, $ttlPersistent);
+        }
 
         return response()->json($data)
-            ->header('Cache-Control', 'public, max-age=86400') // 24h
+            ->header('Cache-Control', 'public, max-age=86400')  // 24h
             ->header('Expires', now()->addDay()->toRfc7231String());
     }
+
 
     /**
      * Dati meteo attuali
@@ -41,7 +61,19 @@ class WeatherController extends Controller
         [$lat, $lon] = explode(',', $cityId);
         $cacheKey = "weather_current_{$lat}_{$lon}";
 
-        $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($lat, $lon) {
+        $ttlMemory = now()->addMinutes(5);
+        $ttlPersistent = now()->addHour();
+
+        // Cache in-memory
+        $data = Cache::store('array')->get($cacheKey);
+
+        // Cache persistente
+        if (!$data) {
+            $data = Cache::store('database')->get($cacheKey);
+        }
+
+        // Cache miss → API
+        if (!$data) {
             $response = Http::get("https://api.openweathermap.org/data/2.5/weather", [
                 'lat' => $lat,
                 'lon' => $lon,
@@ -49,13 +81,20 @@ class WeatherController extends Controller
                 'lang' => 'it',
                 'appid' => config('services.openweather.key'),
             ]);
-            return $response->json();
-        });
+            $data = $response->json();
+
+            Log::info("Cache miss for key: {$cacheKey}");
+
+            // Salvo in entrambe le cache
+            Cache::store('array')->put($cacheKey, $data, $ttlMemory);
+            Cache::store('database')->put($cacheKey, $data, $ttlPersistent);
+        }
 
         return response()->json($data)
-            ->header('Cache-Control', 'public, max-age=300') // 5 minuti
+            ->header('Cache-Control', 'public, max-age=300')       // 5 minuti
             ->header('Expires', now()->addMinutes(5)->toRfc7231String());
     }
+
 
     /**
      * Previsioni a 5 giorni
@@ -67,7 +106,19 @@ class WeatherController extends Controller
         [$lat, $lon] = explode(',', $cityId);
         $cacheKey = "weather_forecast_{$lat}_{$lon}";
 
-        $data = Cache::remember($cacheKey, now()->addHour(), function () use ($lat, $lon) {
+        $ttlMemory = now()->addMinutes(15);
+        $ttlPersistent = now()->addHour();
+
+        // Cache in-memory
+        $data = Cache::store('array')->get($cacheKey);
+
+        // Cache persistente
+        if (!$data) {
+            $data = Cache::store('database')->get($cacheKey);
+        }
+
+        // Cache miss → API
+        if (!$data) {
             $response = Http::get("https://api.openweathermap.org/data/2.5/forecast", [
                 'lat' => $lat,
                 'lon' => $lon,
@@ -75,11 +126,19 @@ class WeatherController extends Controller
                 'lang' => 'it',
                 'appid' => config('services.openweather.key'),
             ]);
-            return $response->json();
-        });
+            $data = $response->json();
+
+            Log::info("Cache miss for key: {$cacheKey}");
+
+            // Salvo in entrambe le cache
+            Cache::store('array')->put($cacheKey, $data, $ttlMemory);
+            Cache::store('database')->put($cacheKey, $data, $ttlPersistent);
+        }
 
         return response()->json($data)
-            ->header('Cache-Control', 'public, max-age=3600') // 1 ora
+            ->header('Cache-Control', 'public, max-age=3600')   // 1 ora
             ->header('Expires', now()->addHour()->toRfc7231String());
     }
+
+
 }
